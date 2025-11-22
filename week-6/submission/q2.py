@@ -1,57 +1,129 @@
+""" hopfield_lab.py
+
+Implements:
+5) 10-city TSP solver using Hopfield-style energy + greedy swap descent
+
+Outputs (saved in ./hopfield_lab_outputs/):
+- tsp_state_matrix.png
+"""
+
 import numpy as np
+import matplotlib.pyplot as plt
+import random
+import os
+import pandas as pd
 
-N = 10
-A, B, C = 500, 500, 1
-max_iterations = 1000
+OUTPUT_DIR = "hopfield_lab_outputs"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-np.random.seed(42)
-distances = np.random.randint(1, 100, (N, N))
-np.fill_diagonal(distances, 0)
+# ---------- Hopfield Network Class ----------
+class HopfieldNetwork:
+    def __init__(self, N):
+        self.N = N
+        self.W = np.zeros((N, N))
+    
+    def train_hebbian(self, patterns, normalize=True):
+        """
+        patterns: array-like shape (P, N) with values in {-1, +1}
+        """
+        N = self.N
+        W = np.zeros((N, N), dtype=float)
+        for p in patterns:
+            W += np.outer(p, p)
+        np.fill_diagonal(W, 0)
+        if normalize:
+            W = W / N
+        self.W = W
+    
+    def energy(self, x):
+        return -0.5 * x.T @ self.W @ x
+    
+    def update_async(self, x_init, max_steps=1000):
+        x = x_init.copy()
+        N = self.N
+        for step in range(max_steps):
+            i = np.random.randint(0, N)
+            raw = self.W[i] @ x
+            x_new = 1 if raw >= 0 else -1
+            x[i] = x_new
+        return x
+    
+    def recall(self, pattern, steps=1000):
+        return self.update_async(pattern.copy(), max_steps=steps)
 
-state = np.random.randint(0, 2, (N, N))
+def bin_to_bipolar(arr):
+    return np.where(arr == 0, -1, 1)
 
-def energy(state):
-    E1 = A * np.sum((np.sum(state, axis=1) - 1) ** 2)
-    E2 = B * np.sum((np.sum(state, axis=0) - 1) ** 2)
-    E3 = 0
-    for i in range(N):
-        for j in range(N):
-            for k in range(N):
-                next_pos = (j + 1) % N
-                E3 += C * distances[i, k] * state[i, j] * state[k, next_pos]
-    return E1 + E2 + E3
+def bipolar_to_bin(arr):
+    return np.where(arr < 0, 0, 1)
 
-def update(state):
-    new_state = np.copy(state)
-    for i in range(N):
-        for j in range(N):
-            input_sum = 0
-            for k in range(N):
-                for l in range(N):
-                    next_pos = (l + 1) % N
-                    input_sum += -A * (np.sum(state[i, :]) - 1)
-                    input_sum += -B * (np.sum(state[:, j]) - 1)
-                    input_sum += -C * distances[i, k] * state[k, next_pos]
-            new_state[i, j] = 1 if input_sum < 0 else 0
-    return new_state
+def hamming(a, b):
+    return np.sum(a != b)
 
-for iteration in range(max_iterations):
-    new_state = update(state)
-    if np.array_equal(new_state, state):
-        break
-    state = new_state
+# ---------- TSP Energy & Greedy Swap Descent ----------
+def tsp_energy(state, dist_mat, A=500.0, B=500.0, C=1.0):
+    N = state.shape[0]
+    pos_sums = state.sum(axis=0)
+    city_sums = state.sum(axis=1)
+    E1 = A * np.sum((pos_sums - 1.0) ** 2) + B * np.sum((city_sums - 1.0) ** 2)
+    E3 = 0.0
+    for j in range(N):
+        jp = (j + 1) % N
+        E3 += np.sum(dist_mat * np.outer(state[:, j], state[:, jp]))
+    return float(E1 + C * E3)
 
-def validate_tour(state):
-    row_sums = np.sum(state, axis=1)
-    col_sums = np.sum(state, axis=0)
-    return np.all(row_sums == 1) and np.all(col_sums == 1)
+def greedy_descent_tsp(N=10, dist_mat=None, max_iters=20000, A=500.0, B=500.0, C=1.0):
+    if dist_mat is None:
+        rng = np.random.RandomState(42)
+        D = rng.rand(N, N)
+        D = (D + D.T) / 2.0
+        np.fill_diagonal(D, 0.0)
+        dist_mat = D
+    state = np.zeros((N, N), dtype=int)
+    perm = list(range(N))
+    random.shuffle(perm)
+    for j in range(N):
+        state[perm[j], j] = 1
+    E = tsp_energy(state, dist_mat, A, B, C)
+    for it in range(max_iters):
+        j1, j2 = np.random.choice(N, size=2, replace=False)
+        i1 = np.where(state[:, j1] == 1)[0][0]
+        i2 = np.where(state[:, j2] == 1)[0][0]
+        new_state = state.copy()
+        new_state[i1, j1] = 0
+        new_state[i2, j2] = 0
+        new_state[i1, j2] = 1
+        new_state[i2, j1] = 1
+        E2 = tsp_energy(new_state, dist_mat, A, B, C)
+        if E2 < E:
+            state = new_state
+            E = E2
+    tour = [int(np.where(state[:, j] == 1)[0][0]) for j in range(N)]
+    total_dist = 0.0
+    for j in range(N):
+        i = tour[j]
+        k = tour[(j + 1) % N]
+        total_dist += dist_mat[i, k]
+    return state, E, tour, total_dist, dist_mat
 
-valid = validate_tour(state)
-print("Distance Matrix:")
-print(distances)
-print("\nFinal State (Tour Representation):")
-print(state)
-if valid:
-    print("\nValid Tour Found!")
-else:
-    print("\nInvalid Tour.")
+# ---------- Main Script ----------
+def main():
+    # Part 4: TSP
+    print("Solving TSP (10 cities)...")
+    state, E_final, tour, total_dist, dist_mat = greedy_descent_tsp(N=10, max_iters=20000, A=500.0, B=500.0, C=1.0)
+    print("TSP energy:", E_final)
+    print("Tour:", tour)
+    print("Total (scaled) distance:", total_dist)
+    plt.figure(figsize=(6, 3))
+    plt.imshow(state, interpolation='nearest')
+    plt.title(f"TSP state matrix; total_dist={total_dist:.4f}")
+    plt.ylabel("City index")
+    plt.xlabel("Position in tour")
+    plt.colorbar()
+    plt.savefig(os.path.join(OUTPUT_DIR, "tsp_state_matrix.png"))
+    plt.close()
+    print("Saved:", os.path.join(OUTPUT_DIR, "tsp_state_matrix.png"))
+
+
+if __name__ == "__main__":
+    main()
