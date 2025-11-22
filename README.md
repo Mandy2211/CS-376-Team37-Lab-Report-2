@@ -1,7 +1,6 @@
 # CS663 - Artificial Intelligence Lab  
-### Lab Report 2 (Assignments 5–8)  
-Submitted by **Team37**  
-Autumn 2025–26, IIIT Vadodara  
+### Lab Report 2
+Submitted by **Team37** IIIT Vadodara ICD  
 Instructor: **Pratik Shah**
 
 ---
@@ -71,7 +70,3 @@ A modified version of Jack’s Car Rental from Sutton & Barto.
 - Optimal movement policy  
 - Policy heatmap  
 - Value-function heatmap  
-
-
-## 📂 Repository Structure
-
